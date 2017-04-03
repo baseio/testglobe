@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>ds</title>
+
+<style type="text/css">
+body, html { overflow: hidden; margin:0; padding: 0;}
+#canvas {
+    position: absolute;
+    top:0px; left:0px; right:0px; bottom:0px;
+    background: #000;
+}
+</style>
+
+<script type="text/javascript" src="T84-three.js"></script>
+<script type="text/javascript" src="T84-ColladaLoader.js"></script>
+<script type="text/javascript" src="T86-OrbitControls.js"></script>
+<script type="text/javascript" src="tween.min.js"></script>
+</head>
+
+<body>
+<script type="text/javascript">
+
+let countries = [];
+let markers   = [];
+let container, camera, scene, renderer, model;
+let loader = new THREE.ColladaLoader();
+
+loader.load('globemodel.dae', (collada) => {
+	console.log('loaded', collada.scene);
+
+	model = new THREE.Object3D();
+		
+	let clone = new THREE.Object3D();
+
+	collada.scene.children.forEach( function(child){
+		//console.log('name', child.name, child);
+		
+		if( child.name == 'Fbx_Root_GlobeSea' ){
+			clone = child.children[0];
+			clone.name     = "water";
+			clone.material = new THREE.MeshBasicMaterial( { color: 0x000044, opacity:0.2 } );
+			model.add( clone );
+		
+		}else if( child.name.length == 2 ){
+			clone = child.children[0];
+			clone.name 	   = child.name;
+			clone.material = new THREE.ShaderMaterial({
+				uniforms: {
+					scale: {type: 'f', value:0.05}, // value is extrusion
+				},
+				vertexShader: vertexShaderSource,
+				fragmentShader: normalShaderSource,
+				
+			});
+			countries.push(clone);
+
+			model.add( clone );
+		}
+	});
+
+	// Rotate model to align earth
+	model.rotation.y = 90 * ( Math.PI / 180);
+	
+	init();
+	//createDebugEarth();
+	markLocations();
+	update();
+});
+
+const createDebugEarth = function(){
+	let geometry    = new THREE.SphereGeometry(500, 32, 32)
+    let material    = new THREE.MeshPhongMaterial();
+    material.map    = THREE.ImageUtils.loadTexture('earthmap.jpg')
+    let mesh        = new THREE.Mesh(geometry, material);
+    scene.add( mesh );
+}
+
+const init = function(){
+	container = document.createElement( 'div' );
+	document.body.appendChild( container );
+
+	camera = new THREE.PerspectiveCamera( 80, window.innerWidth / window.innerHeight, 1, 10000 );
+	camera.position.set( 0,0, 1000 );
+
+	scene = new THREE.Scene();
+
+	scene.add( model );
+	scene.add( new THREE.AmbientLight( 0xFFFFFF ) );
+
+	camera.lookAt( scene.position );
+
+	renderer = new THREE.WebGLRenderer({antialias: true});
+	renderer.setPixelRatio( window.devicePixelRatio );
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	container.appendChild( renderer.domElement );
+
+	window.addEventListener( 'resize', function(){
+		camera.aspect = window.innerWidth / window.innerHeight;
+		camera.updateProjectionMatrix();
+		renderer.setSize( window.innerWidth, window.innerHeight );
+	}, false );
+
+	//window.scene = scene; // for Threejs Inspector (Chrome extension)
+
+	//document.body.addEventListener( 'click', randomizeExtrusions);
+	//document.body.addEventListener( 'click', locate);
+
+	controls = new THREE.OrbitControls( camera, renderer.domElement );
+	//controls.autoRotate = true;
+}
+
+const update = function(time) {
+	TWEEN.update(time);
+	controls.update();
+
+	markers.forEach( function(m){
+		m.lookAt(camera.position);
+		m.rotation.z = 0;
+	});
+
+	renderer.render( scene, camera );
+	requestAnimationFrame( update );
+}
+
+const locate = function(){
+	locationIndex ++;
+	if(locationIndex >= locations.length) locationIndex = 0;
+	console.log('locationIndex', locationIndex, locations[locationIndex].name);
+
+	//Asger: Would be awesome if the camera could mode "spherically" to the next location!!
+	
+	var targetCameraPosition = llv3(locations[locationIndex].lat, locations[locationIndex].lng, 1000);
+  
+  	var o = {t:0};
+    new TWEEN.Tween(o).to({t: 1}, 1000).easing( TWEEN.Easing.Cubic.InOut ).onUpdate(function () {
+        camera.position.lerp(targetCameraPosition, o.t );
+        camera.lookAt(scene.position)
+	}).start();
+}
+
+const randomizeExtrusions = function(){
+	countries.forEach( function(c){
+		let val = Math.random() * 0.6;
+		new TWEEN.Tween(c.material.uniforms.scale).to({value:val}, 500).easing(TWEEN.Easing.Cubic.Out).start();
+	});
+}
+
+// Source: http://www.latlong.net/search.php?keyword=Berlin
+const locations = [
+    {name:"Singapore",  lat:1.2902700,   lng:103.851959},
+    {name:"Porto",      lat:41.150223,   lng:-8.629932},
+    {name:"Mainz",      lat:50.110924,   lng:8.682127},
+    {name:"Nairobi",    lat:-1.280423,   lng:36.816311},
+    {name:"Kigali",     lat:-1.935114,   lng:30.082111},
+    {name:"Oslo",       lat:59.911491,   lng:10.757933},
+    {name:"Rotterdam",  lat:51.956116,   lng:4.558640},
+    {name:"Berlin",     lat:52.518623,   lng:13.376198},
+    {name:"Boston",     lat:42.366978,   lng:-71.022362},
+    {name:"San Diego",  lat:32.774799,   lng:-117.071869},
+    {name:"Detroit",    lat:42.331429,   lng:-83.045753},
+];
+let locationIndex = 0;
+
+const markLocations = function(){
+	var geometry = new THREE.SphereGeometry(10, 32, 32)
+	var material = new THREE.MeshBasicMaterial( {color: 0xffffff} );
+	
+    for(var i=0; i<locations.length; i++){
+    	let marker = new THREE.Mesh( geometry, material );
+    	marker.position.copy( llv3(locations[i].lat, locations[i].lng, 510) );    
+    	scene.add(marker);
+        locations[i].mesh = marker;
+
+        // billboards
+        let plane = new THREE.Mesh(
+			new THREE.PlaneGeometry(100, 50, 1, 1),
+			new THREE.MeshBasicMaterial({side:THREE.DoubleSide})
+		);
+    	plane.position.copy( llv3(locations[i].lat, locations[i].lng, 550) );    
+		scene.add(plane);
+		markers.push(plane);
+    };
+}
+
+const llv3 = function(lat, lng, radius){
+    var phi   = (90-lat)*(Math.PI/180);
+    var theta = (lng+180)*(Math.PI/180);
+
+    var x = -((radius) * Math.sin(phi)*Math.cos(theta));
+    var z = ((radius) * Math.sin(phi)*Math.sin(theta));
+    var y = ((radius) * Math.cos(phi));
+
+    return new THREE.Vector3(x,y,z);
+}
+
+const vertexShaderSource = `
+	const float WATER_HEIGHT = 500.0;
+	const float MAX_HEIGHT = 0.5;
+	
+	uniform float scale;
+	uniform vec4 color;
+	varying vec3 vNormal;
+	
+	void main() {
+		vNormal = normalMatrix * normal;
+		float height = length(position);
+		float s = height < WATER_HEIGHT ? 1.0 : 1.0 + MAX_HEIGHT*scale;
+		vec3 norm = position / height;
+		gl_Position = projectionMatrix * modelViewMatrix * vec4( s * position, 1.0 );
+	}
+`;
+
+const normalShaderSource = `
+	#ifdef GL_ES
+		precision highp float;
+	#endif
+	
+	varying vec3 vNormal;
+	uniform vec4 color;
+	
+	void main() {
+		vec3 light = vec3(0.0,0.0,1.0);
+		float dProd = (dot(vNormal, light) + 1.0)/2.0;
+		gl_FragColor = vec4(dProd, dProd, dProd, 1.0) * color;
+		gl_FragColor.rgb = 0.5 + 0.5 * vNormal; // render normals
+	}
+`;
+
+</script>
+
+</body>
+
+</html>
