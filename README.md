@@ -4,8 +4,10 @@ Just for Asger and me :)
 
 ## Whishlist
 
-[-] "Spherical lerp", so camera moves around the globe to a new location (see the `locate` method).
-[-] "Billboards", so the planes (near the locations) always "look at" the camera, but appears to be in "screenspace" / as "sprites".
+- [ ] "Spherical lerp", so camera moves around the globe to a new location (see the `locate` method).
+- [ ] "Billboards", so the planes (near the locations) always "look at" the camera, but appears to be in "screenspace" / as "sprites".
+- [ ] Smooth mesh, so the country borders are less visible (when all extrusions are the same)
+
 
 ## Running locally
 
