@@ -25,13 +25,41 @@ body, html { overflow: hidden; margin:0; padding: 0;}
 
 let countries = [];
 let markers   = [];
-let container, camera, scene, renderer, model;
-let loader = new THREE.ColladaLoader();
+let container, camera, scene, renderer;
+let globemodel, markermodel;
+let testTexture;
 
-loader.load('globemodel.dae', (collada) => {
-	console.log('loaded', collada.scene);
+//let globe_loader = new THREE.ColladaLoader();
+//let marker_loader = new THREE.ColladaLoader();
+let colladaLoader = new THREE.ColladaLoader();
+let textureLoader = new THREE.TextureLoader();
 
-	model = new THREE.Object3D();
+function loadModel(filename, callback){
+	colladaLoader.load(filename, callback);
+}
+
+loadModel('globemodel.dae', (collada) => {
+	console.log('loaded globe');
+	parseGlobe(collada);
+
+	testTexture = textureLoader.load('1920x1080.png');
+
+	loadModel('marker3.dae', (collada) => {
+		console.log('loaded marker');
+		parseMarker(collada);
+
+		// begin
+
+		init();
+		//createDebugEarth();
+		markLocations();
+		update();
+	});
+});
+
+
+function parseGlobe(collada){
+	globemodel = new THREE.Object3D();
 		
 	let clone = new THREE.Object3D();
 
@@ -42,7 +70,7 @@ loader.load('globemodel.dae', (collada) => {
 			clone = child.children[0];
 			clone.name     = "water";
 			clone.material = new THREE.MeshBasicMaterial( { color: 0x000044, opacity:0.2 } );
-			model.add( clone );
+			globemodel.add( clone );
 		
 		}else if( child.name.length == 2 ){
 			clone = child.children[0];
@@ -57,18 +85,35 @@ loader.load('globemodel.dae', (collada) => {
 			});
 			countries.push(clone);
 
-			model.add( clone );
+			globemodel.add( clone );
 		}
 	});
 
 	// Rotate model to align earth
-	model.rotation.y = 90 * ( Math.PI / 180);
+	globemodel.rotation.y = 90 * ( Math.PI / 180);
+};
+
+function parseMarker(collada){
+	//console.log('marker collada:', collada.scene);
+	markermodel = new THREE.Object3D();
+
+	let pin = collada.scene.children[2].children[0].clone();
+	pin.name = "pin";
+	pin.material = new THREE.MeshBasicMaterial( {color: 0xffffff, side:THREE.DoubleSide} );
+		
+	let center = collada.scene.children[1].children[0].clone();
+	center.name = "center";
+	center.material = new THREE.MeshBasicMaterial( {color: 0xeeeeee, side:THREE.DoubleSide} );
 	
-	init();
-	//createDebugEarth();
-	markLocations();
-	update();
-});
+	pin.add( center );
+	markermodel.add( pin );
+	
+	pin.position.z = -38;
+	pin.scale.set(20,20,20);
+	//markermodel.updateMatrix();
+
+	console.log('markermodel', markermodel);
+}
 
 const createDebugEarth = function(){
 	let geometry    = new THREE.SphereGeometry(500, 32, 32)
@@ -87,7 +132,7 @@ const init = function(){
 
 	scene = new THREE.Scene();
 
-	scene.add( model );
+	scene.add( globemodel );
 	scene.add( new THREE.AmbientLight( 0xFFFFFF ) );
 
 	camera.lookAt( scene.position );
@@ -165,22 +210,35 @@ let locationIndex = 0;
 
 const markLocations = function(){
 	var geometry = new THREE.SphereGeometry(10, 32, 32)
-	var material = new THREE.MeshBasicMaterial( {color: 0xffffff} );
+	var material = new THREE.MeshBasicMaterial( {color: 0xff0000, opacity:0.5, transparent: true,} );
 	
     for(var i=0; i<locations.length; i++){
-    	let marker = new THREE.Mesh( geometry, material );
-    	marker.position.copy( llv3(locations[i].lat, locations[i].lng, 510) );    
-    	scene.add(marker);
-        locations[i].mesh = marker;
+		// container
+		let container = new THREE.Object3D();
+		container.name = "marker-"+ locations[i].name;
+        container.position.copy( llv3(locations[i].lat, locations[i].lng, 520) );
 
-        // billboards
+    	// pin
+        let pin = markermodel.clone();
+    	pin.name = 'pin';
+    	pin.rotation.x = 90 * ( Math.PI / 180);
+        container.add(pin);
+
+        // cube
+        let cube = new THREE.Mesh(new THREE.CubeGeometry(10, 10, 10),material);
+        //cube.scale.set(3,3,3);
+        container.add(cube);
+
+        // billboard
         let plane = new THREE.Mesh(
 			new THREE.PlaneGeometry(100, 50, 1, 1),
-			new THREE.MeshBasicMaterial({side:THREE.DoubleSide})
+			new THREE.MeshBasicMaterial({side:THREE.DoubleSide, opacity:0.5, transparent: true, map:testTexture})
 		);
-    	plane.position.copy( llv3(locations[i].lat, locations[i].lng, 550) );    
-		scene.add(plane);
-		markers.push(plane);
+        //container.add(plane);
+		
+		markers.push(container);
+		scene.add(container);
+		
     };
 }
 
