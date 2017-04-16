@@ -117,8 +117,7 @@ const update = function(time) {
 	controls.update();
 
 	markers.forEach( function(m){
-		m.lookAt(camera.position);
-		m.rotation.z = 0;
+		m.quaternion.copy(camera.quaternion);
 	});
 
 	renderer.render( scene, camera );
