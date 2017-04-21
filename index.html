@@ -27,10 +27,10 @@ let countries = [];
 let markers   = [];
 let container, camera, scene, renderer;
 let globemodel, markermodel;
+let globe, group;
+
 let testTexture;
 
-//let globe_loader = new THREE.ColladaLoader();
-//let marker_loader = new THREE.ColladaLoader();
 let colladaLoader = new THREE.ColladaLoader();
 let textureLoader = new THREE.TextureLoader();
 
@@ -97,22 +97,43 @@ function parseMarker(collada){
 	//console.log('marker collada:', collada.scene);
 	markermodel = new THREE.Object3D();
 
+	// TODO: add alpha blend to shader?
+	/*
+	let mat = new THREE.ShaderMaterial({
+		uniforms: {
+			scale: {type: 'f', value:0.05}, // value is extrusion
+		},
+		vertexShader: vertexShaderSource,
+		fragmentShader: normalShaderSource,
+		
+	});
+	*/
+
+	//TODO: Clean up structure in the collada file, so we can awoid this...
 	let pin = collada.scene.children[2].children[0].clone();
 	pin.name = "pin";
-	pin.material = new THREE.MeshBasicMaterial( {color: 0xffffff, side:THREE.DoubleSide} );
+	
+	//pin.material = new THREE.MeshBasicMaterial( {color: 0xffffff, side:THREE.DoubleSide} );
+	pin.material = new THREE.MeshBasicMaterial({
+		color: 0xffffff,
+		depthTest: false
+	});
 		
 	let center = collada.scene.children[1].children[0].clone();
 	center.name = "center";
-	center.material = new THREE.MeshBasicMaterial( {color: 0xeeeeee, side:THREE.DoubleSide} );
+	center.material = new THREE.MeshBasicMaterial({
+		color: 0xFF0000,
+		side:THREE.DoubleSide,
+		depthTest: false
+	});
 	
 	pin.add( center );
 	markermodel.add( pin );
 	
 	pin.position.z = -38;
 	pin.scale.set(20,20,20);
-	//markermodel.updateMatrix();
 
-	console.log('markermodel', markermodel);
+	//console.log('markermodel', markermodel);
 }
 
 const createDebugEarth = function(){
@@ -126,16 +147,25 @@ const createDebugEarth = function(){
 const init = function(){
 	container = document.createElement( 'div' );
 	document.body.appendChild( container );
-
-	camera = new THREE.PerspectiveCamera( 80, window.innerWidth / window.innerHeight, 1, 10000 );
-	camera.position.set( 0,0, 1000 );
-
 	scene = new THREE.Scene();
 
-	scene.add( globemodel );
-	scene.add( new THREE.AmbientLight( 0xFFFFFF ) );
 
+	// Perspective Camera
+	camera = new THREE.PerspectiveCamera( 80, window.innerWidth / window.innerHeight, 1, 10000 );
+
+	camera.position.set( 0,0, 1000 );
+	camera.up = new THREE.Vector3(0,1,0);
+	scene.add( camera );
 	camera.lookAt( scene.position );
+
+	group = new THREE.Object3D();
+	scene.add(group);
+	
+	//globe = scene.add( globemodel );
+	globe = group.add( globemodel );
+
+	//scene.add( new THREE.AmbientLight( 0xFFFFFF ) );
+
 
 	renderer = new THREE.WebGLRenderer({antialias: true});
 	renderer.setPixelRatio( window.devicePixelRatio );
@@ -151,20 +181,30 @@ const init = function(){
 	//window.scene = scene; // for Threejs Inspector (Chrome extension)
 
 	//document.body.addEventListener( 'click', randomizeExtrusions);
-	//document.body.addEventListener( 'click', locate);
+	document.body.addEventListener( 'click', locate);
 
-	controls = new THREE.OrbitControls( camera, renderer.domElement );
+	//controls = new THREE.OrbitControls( camera, renderer.domElement );
 	//controls.autoRotate = true;
 }
 
 const update = function(time) {
 	TWEEN.update(time);
-	controls.update();
+	//controls.update();
+
+	//camera.lookAt(scene.position);
+
+	let distanceToHorizon = globe.position.distanceTo(camera.position) -100;
 
 	markers.forEach( function(m){
 		m.quaternion.copy(camera.quaternion);
-	});
 
+		let markerDist = m.position.distanceTo( camera.position);
+		//m.children[0].visible = markerDist < distanceToHorizon;
+		
+		//m.children[0].children[0].children[0].rotateZ( 0.1 )
+		//m.children[0].rotateZ( 0.1 )
+	});
+	
 	renderer.render( scene, camera );
 	requestAnimationFrame( update );
 }
@@ -174,16 +214,64 @@ const locate = function(){
 	if(locationIndex >= locations.length) locationIndex = 0;
 	console.log('locationIndex', locationIndex, locations[locationIndex].name);
 
-	//Asger: Would be awesome if the camera could mode "spherically" to the next location!!
-	
-	var targetCameraPosition = llv3(locations[locationIndex].lat, locations[locationIndex].lng, 1000);
-  
-  	var o = {t:0};
-    new TWEEN.Tween(o).to({t: 1}, 1000).easing( TWEEN.Easing.Cubic.InOut ).onUpdate(function () {
-        camera.position.lerp(targetCameraPosition, o.t );
-        camera.lookAt(scene.position)
-	}).start();
+    // rotation (using slerp)
+    var latitude = locations[locationIndex].lat;
+    var longitude = locations[locationIndex].lng;
+    var qstart = new THREE.Quaternion().copy(group.quaternion); // src quaternion
+    //var qstart = new THREE.Quaternion().copy(g.camera.quaternion); // src quaternion
+    var qend = calcQuat( latitude, longitude ); // dst quaternion
+    var qtemp = new THREE.Quaternion();
+
+    var o = {t: 0};
+    new TWEEN.Tween(o)
+            .to({t: 1}, 1000)
+            .easing( TWEEN.Easing.Cubic.InOut )
+      .onUpdate(function () {
+
+        THREE.Quaternion.slerp(qstart, qend, qtemp, o.t);
+        group.quaternion.copy( qtemp );
+        //g.camera.lookAt(group.position)
+        //g.camera.quaternion.copy( qtemp );
+
+            })
+      .start()
 }
+// calculate the spheres new quaternion
+function calcQuat( latitude, longitude ) {
+
+	var verticalOffset = 0.0;
+	var phi = latitude * Math.PI / 180 - verticalOffset;
+	var theta = ( 270 - longitude) * Math.PI / 180;
+
+	var euler = new THREE.Euler(phi, theta, 0, 'XYZ');
+	var newq = new THREE.Quaternion().setFromEuler(euler);
+
+	return newq;
+
+}
+
+
+const zoom = function(){
+	/*
+	console.log('zoom');
+  	var fov = camera.fov * ( Math.PI / 180 );
+  	var objectSize = 160;//0.6 + ( 0.5 * Math.sin( Date.now() * 0.001 ) );
+  	var distance = 500 + Math.abs( objectSize / Math.sin( fov / 2 ) );
+  	*/
+
+  	/*
+	var t = llv3(locations[locationIndex].lat, locations[locationIndex].lng, 500);
+
+	camera.lookAt(t);
+  	camera.position.x -= 10;
+
+  	console.log('pos', camera.position);
+
+  	//var cameraPosition = new THREE.Vector3(distance, 0, 0);
+  	//camera.position.copy( cameraPosition );
+  	*/
+}
+
 
 const randomizeExtrusions = function(){
 	countries.forEach( function(c){
@@ -216,7 +304,7 @@ const markLocations = function(){
 		// container
 		let container = new THREE.Object3D();
 		container.name = "marker-"+ locations[i].name;
-        container.position.copy( llv3(locations[i].lat, locations[i].lng, 520) );
+        container.position.copy( llv3(locations[i].lat, locations[i].lng, 510) );
 
     	// pin
         let pin = markermodel.clone();
@@ -231,15 +319,18 @@ const markLocations = function(){
 
         // billboard
         let plane = new THREE.Mesh(
-			new THREE.PlaneGeometry(100, 50, 1, 1),
-			new THREE.MeshBasicMaterial({side:THREE.DoubleSide, opacity:0.5, transparent: true, map:testTexture})
+			new THREE.PlaneGeometry(16, 9, 1, 1),
+			new THREE.MeshBasicMaterial({depthTest: false, map:testTexture})
 		);
-        //container.add(plane);
+        container.add(plane);
 		
 		markers.push(container);
-		scene.add(container);
+		
+		//scene.add(container);
+		group.add(container);
 		
     };
+    console.log('markers:', markers);
 }
 
 const llv3 = function(lat, lng, radius){
@@ -285,6 +376,17 @@ const normalShaderSource = `
 		gl_FragColor.rgb = 0.5 + 0.5 * vNormal; // render normals
 	}
 `;
+
+function onKeyDown( event ){
+	var keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40 };
+	switch ( event.keyCode ) {
+		case keys.LEFT:
+			zoom();
+			break;
+
+	}
+}
+window.addEventListener( 'keydown', onKeyDown, false );
 
 </script>
 
