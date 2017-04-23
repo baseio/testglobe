@@ -14,18 +14,24 @@ body, html { overflow: hidden; margin:0; padding: 0;}
 }
 </style>
 
+<script type="text/javascript">
+
+
+</script>
+
 <script type="text/javascript" src="T84-three.js"></script>
 <script type="text/javascript" src="T84-ColladaLoader.js"></script>
-<script type="text/javascript" src="T86-OrbitControls.js"></script>
+<script type="text/javascript" src="baseio.three.arcball.js"></script>
 <script type="text/javascript" src="tween.min.js"></script>
 </head>
 
 <body>
 <script type="text/javascript">
 
+
 let countries = [];
 let markers   = [];
-let container, camera, scene, renderer;
+let container, camera, scene, renderer, arcball;
 let globemodel, markermodel;
 let globe, group;
 
@@ -161,11 +167,9 @@ const init = function(){
 	group = new THREE.Object3D();
 	scene.add(group);
 	
-	//globe = scene.add( globemodel );
 	globe = group.add( globemodel );
 
 	//scene.add( new THREE.AmbientLight( 0xFFFFFF ) );
-
 
 	renderer = new THREE.WebGLRenderer({antialias: true});
 	renderer.setPixelRatio( window.devicePixelRatio );
@@ -183,23 +187,22 @@ const init = function(){
 	//document.body.addEventListener( 'click', randomizeExtrusions);
 	document.body.addEventListener( 'click', locate);
 
-	//controls = new THREE.OrbitControls( camera, renderer.domElement );
-	//controls.autoRotate = true;
+	arcball = new BASE_THREE_ARCBALL.create( container, group );
+    arcball.kAutorotationSpeed = 0.005;
+    arcball.useclamp = true;
 }
 
 const update = function(time) {
 	TWEEN.update(time);
-	//controls.update();
-
-	//camera.lookAt(scene.position);
+	//arcball.update();
 
 	let distanceToHorizon = globe.position.distanceTo(camera.position) -100;
 
 	markers.forEach( function(m){
-		m.quaternion.copy(camera.quaternion);
+		m.quaternion.copy(group.quaternion.clone().inverse());
 
-		let markerDist = m.position.distanceTo( camera.position);
-		//m.children[0].visible = markerDist < distanceToHorizon;
+		let markerDist = m.getWorldPosition().distanceTo( camera.position );
+		m.children[0].visible = markerDist < distanceToHorizon;
 		
 		//m.children[0].children[0].children[0].rotateZ( 0.1 )
 		//m.children[0].rotateZ( 0.1 )
@@ -215,39 +218,36 @@ const locate = function(){
 	console.log('locationIndex', locationIndex, locations[locationIndex].name);
 
     // rotation (using slerp)
-    var latitude = locations[locationIndex].lat;
-    var longitude = locations[locationIndex].lng;
-    var qstart = new THREE.Quaternion().copy(group.quaternion); // src quaternion
-    //var qstart = new THREE.Quaternion().copy(g.camera.quaternion); // src quaternion
-    var qend = calcQuat( latitude, longitude ); // dst quaternion
-    var qtemp = new THREE.Quaternion();
+    var qs = new THREE.Quaternion().copy(group.quaternion);
+    var qe = llq( locations[locationIndex].lat, locations[locationIndex].lng );
+    var qt = new THREE.Quaternion();
 
     var o = {t: 0};
-    new TWEEN.Tween(o)
-            .to({t: 1}, 1000)
-            .easing( TWEEN.Easing.Cubic.InOut )
-      .onUpdate(function () {
+	new TWEEN.Tween(o).to({t: 1}, 1000).easing( TWEEN.Easing.Quadratic.InOut ).onUpdate(function () {
+		THREE.Quaternion.slerp(qs, qe, qt, o.t);
+		group.quaternion.copy( qt );
+	}).start();
 
-        THREE.Quaternion.slerp(qstart, qend, qtemp, o.t);
-        group.quaternion.copy( qtemp );
-        //g.camera.lookAt(group.position)
-        //g.camera.quaternion.copy( qtemp );
-
-            })
-      .start()
+	// http://sole.github.io/tween.js/examples/03_graphs.html
 }
-// calculate the spheres new quaternion
-function calcQuat( latitude, longitude ) {
 
-	var verticalOffset = 0.0;
-	var phi = latitude * Math.PI / 180 - verticalOffset;
-	var theta = ( 270 - longitude) * Math.PI / 180;
 
+function llq( lat, lng ) {
+	var phi = lat * Math.PI / 180;
+	var theta = ( 270 - lng) * Math.PI / 180;
 	var euler = new THREE.Euler(phi, theta, 0, 'XYZ');
-	var newq = new THREE.Quaternion().setFromEuler(euler);
+	return new THREE.Quaternion().setFromEuler(euler);
+}
 
-	return newq;
+const llv3 = function(lat, lng, radius){
+    var phi   = (90-lat)*(Math.PI/180);
+    var theta = (lng+180)*(Math.PI/180);
 
+    var x = -((radius) * Math.sin(phi)*Math.cos(theta));
+    var z = ((radius) * Math.sin(phi)*Math.sin(theta));
+    var y = ((radius) * Math.cos(phi));
+
+    return new THREE.Vector3(x,y,z);
 }
 
 
@@ -333,16 +333,7 @@ const markLocations = function(){
     console.log('markers:', markers);
 }
 
-const llv3 = function(lat, lng, radius){
-    var phi   = (90-lat)*(Math.PI/180);
-    var theta = (lng+180)*(Math.PI/180);
 
-    var x = -((radius) * Math.sin(phi)*Math.cos(theta));
-    var z = ((radius) * Math.sin(phi)*Math.sin(theta));
-    var y = ((radius) * Math.cos(phi));
-
-    return new THREE.Vector3(x,y,z);
-}
 
 const vertexShaderSource = `
 	const float WATER_HEIGHT = 500.0;
